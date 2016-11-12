@@ -1,25 +1,95 @@
 ---
 title: "Reproducible Research: Peer Assessment 1"
-output: 
-  html_document:
-    keep_md: true
+output:
+  md_document:
+    variant: markdown_github
 ---
 
 
 ## Loading and preprocessing the data
+```{r, load_data}
+#(1) Loading the data
+urlfile <- "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2Factivity.zip"
+zipfile <- "activitydata.zip"
+download.file(urlfile, zipfile)
+filename <- unzip(zipfile = zipfile)
+activities <- read.csv(filename,na.strings = "NA")
 
+#(2) Preprocessing for different questions
+library(lubridate)
+meanactivities <- aggregate(steps ~ date, activities, mean)
+meanactivities$date <- ymd(meanactivities$date)
+activitiestotal<-aggregate(steps~interval,activities,sum)
+```
 
 
 ## What is mean total number of steps taken per day?
-
+```{r, histogram_total_number}
+#(1) Calculating the total steps per day
+totalactivities <- aggregate(steps ~ date, activities, sum)
+#(2) Histogram of the total steps taken each day
+hist(totalactivities$steps,
+     main="Histogram of total steps per day",
+     xlab= "Number of steps")
+#(3) Calculate and report the median and mean of total number of steps per day  
+summary(totalactivities$steps)
+```
 
 
 ## What is the average daily activity pattern?
-
+```{r, lineplot_average_steps}
+#(1) Time series plot (type="l") of the interval and the average steps taken
+with(meanactivities,plot(date,steps,type="l",xlab="Date",ylab="Average steps"))
+#(2) The interval which contains the maximum number of steps
+activitiestotal[activitiestotal$steps == max(activitiestotal$steps),]
+```
 
 
 ## Imputing missing values
-
-
+```{r missing_value}
+#(1) Number of rows with missing values (incomplete cases) 
+comp<-complete.cases(activities)
+nrow(activities[!comp,])
+#(2) Define a strategy to impute the missing values
+# Looking at the data, I see 8 days where for all intervals the data is missing.
+# This makes me conclude that only a mean of the interval leads to a straightforward 
+# impution that seems logical.
+# Since the steps are in integer, I take the floor of the mean
+means<-floor(aggregate(steps ~ interval,activities,mean)) 
+# I merge the 2 steps to compare them easier
+activities_m<-merge(activities,means,by="interval")
+activities_m<-transform(activities_m,steps=steps.x,stepsmean=steps.y)
+library(sqldf)
+# I do the replacement after all with SQL since it's there the most straightforward to me.
+#(3) Create a new dataset with the missing data filled in
+activities.c<-sqldf('select case when steps is NULL then stepsmean else steps end steps, date, interval from activities_m')
+#(4) Make a new histogram with the new dataset
+totalactivities.c <- aggregate(steps ~ date, activities.c, sum)
+hist(totalactivities.c$steps,
+     main="Histogram of total steps per day\n after imputing the missing values",
+     xlab= "Number of steps")
+```
+The number are higher in the new histogram compared to the old one, but the spread is more or less the same.
+This means that the impact of imputing the missing data is minimal at first glance.
 
 ## Are there differences in activity patterns between weekdays and weekends?
+```{r}
+#(1) Create a new factor variable with a "weekday" and a "weekend" level
+library(timeDate)
+activities.c$weekpart<-as.factor(ifelse(isWeekend(activities.c$date),"weekday","weekend"))
+#(2) Make a panel plot (type="l") of the interval and averarge steps taken across weekday and weekend days
+library(ggplot2)
+#activities.c.mean<-aggregate(steps~c(interval,weekpart),activities.c,mean)
+activities.c.mean<-sqldf('select interval,weekpart,avg(steps) steps from \"activities.c\" group by interval,weekpart')
+g<-ggplot(activities.c.mean,aes(interval,steps))
+g<-g+geom_line()
+g<-g+facet_grid(weekpart~ .)
+g<-g+ggtitle("Difference in number of steps patterns over weekdays and weekends")
+g
+```
+
+For completeness and make it better reproducible, here is the session_info from devtools for this session:
+```{r, echo=FALSE}
+library(devtools)
+devtools::session_info()
+```
